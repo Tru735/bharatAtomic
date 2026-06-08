@@ -1,0 +1,94 @@
+/Users/tjsss/Desktop/bharatAtomic/bA/dataset/
+/Users/tjsss/Desktop/bharatAtomic/semPhase1/NAFNet_github_megvii/
+/Users/tjsss/Desktop/bharatAtomic/semPhase1/RDUNet_github_gurrola/
+/Users/tjsss/Desktop/bharatAtomic/semPhase1/model_weights/
+
+# Ignore the virtual environment
+bA/
+
+# Ignore the specific model weights folder
+semPhase1/model_weights/
+
+*.pkl
+*.jpg
+
+
+# Ignore large dataset files inside notebooks
+semPhase1/notebooks/*.pt
+
+semPhase1/notebooks/NAFNet/
+# Ignore OS-specific system files
+.DS_Store
+semPhase1/.DS_Store
+
+# Ignore virtual environment completely
+bA/
+
+# Ignore dataset archives and weights
+*.zip
+semPhase1/model_weights/
+semPhase1/notebooks/*.pt
+
+# Ignore system junk files
+.DS_Store
+**/.DS_Store
+
+semPhase1/NAFNet_github_megvii/
+semPhase1/RDUNet_github_gurrola/
+
+
+
+
+CLAUDE.md
+get-pip.py
+
+/Users/tjsss/Desktop/bharatAtomic/papers
+*.pdf
+*.pt
+*.jpg
+
+/.claude
+/papers
+/dataset
+./semPhase1/notebooks/*.pt
+
+# Python
+__pycache__/
+*.pyc
+
+# Virtual envs
+venv/
+env/
+bA/
+
+# ML checkpoints
+*.pth
+*.pt
+*.ckpt
+*.onnx
+
+# Datasets
+*.zip
+*.pkl
+datasets/
+data/
+
+# Jupyter
+.ipynb_checkpoints/
+
+# Logs
+runs/
+wandb/
+tensorboard/
+
+semPhase1/
+
+# ML checkpoints
+*.pth
+*.pt
+*.ckpt
+*.onnx
+
+# Datasets
+*.zip
+*.pkl

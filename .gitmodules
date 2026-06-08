@@ -1,0 +1,12 @@
+[submodule "semPhase1/NAFNet_github_megvii"]
+	path = semPhase1/NAFNet_github_megvii
+	url = https://github.com/megvii-research/NAFNet
+[submodule "semPhase1/RDUNet_github_gurrola"]
+	path = semPhase1/RDUNet_github_gurrola
+	url = https://github.com/JavierGurrola/RDUNet
+[submodule "semPhase1/semPhase1/notebooks/NAFNet"]
+	path = semPhase1/semPhase1/notebooks/NAFNet
+	url = https://github.com/megvii-research/NAFNet
+[submodule "semPhase1/pix2pix"]
+	path = semPhase1/pix2pix
+	url = https://github.com/junyanz/pytorch-CycleGAN-and-pix2pix

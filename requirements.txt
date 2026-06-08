@@ -1,0 +1,10 @@
+numpy
+pandas
+matplotlib
+torch
+torchvision
+scikit-image
+opencv-python
+tqdm
+time
+tifffile
