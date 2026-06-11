@@ -69,3 +69,5 @@ semPhase1/RDUNet_github_gurrola/
 
 # Claude
 .claude/
+CLAUDE.md
+get-pip.py

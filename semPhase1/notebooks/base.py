@@ -31,7 +31,7 @@ from local_arch import AvgPool2d , Local_Base
 import arch_util
 from pathlib import Path
 from DISTS_pytorch import DISTS
-
+torch.amp.autocast(device_type="mps")
 
 device = torch.device('mps' if  torch.backends.mps.is_available() else 'cpu')
 psnr_metric = PeakSignalNoiseRatio(data_range=1.0)
@@ -140,7 +140,13 @@ def calc_loss(pred, target,metric = 'ssim', theta=0.2):
         ssim_fn = (1.00-ssim_val)
         return ((1 - theta) * l1(pred, target)) + (theta * ssim_fn)
     elif metric =='dists':
-        dists_loss = D(pred, target, require_grad=True, batch_average=True)
+        torch.backends.mps.is_available() 
+        criterion = D.to(device)
+        criterion.eval()
+        for param in criterion.parameters():
+            param.requires_grad = False
+        dists_score = criterion(pred, target, require_grad=True, batch_average=True)
+        dists_loss = 1-dists_score
         return ((1-theta)*l1(pred, target) + (theta*dists_loss))
 
 
@@ -148,9 +154,22 @@ def all_losses(pred, target):
     # rmse_val = mse_fn(pred,target)
     ssim_val = ssim(pred, target, data_range=1.0, size_average=True).item()
     psnr_val = psnr_metric(pred, target).item()
-    dists_val = D(pred,target , batch_average = True).item()
+    torch.backends.mps.is_available() 
+    criterion = D.to(device)
+    criterion.eval()
+    for param in criterion.parameters():
+        param.requires_grad = False
+    dists_val = criterion(pred, target, require_grad=True, batch_average=True).item()
     return ssim_val,psnr_val,dists_val
 
+def dists_loss(pred, target):
+    torch.backends.mps.is_available() 
+    criterion = D.to(device)
+    criterion.eval()
+    for param in criterion.parameters():
+        param.requires_grad = False
+    dists_loss = criterion(pred.float(), target.float(), require_grad=True, batch_average=True).item()
+    return dists_loss
 
 class NoiseImage:
     def __init__(self, prob=None):
@@ -598,7 +617,7 @@ def load_data(train_dataset, test_dataset, batch_size, val_ratio=0.2):
 
 import time
 
-def fineTune(model, train_loader, val_loader, num_epochs=20 , name='new_model.pth' , save_freq = 2, metric = 'ssim' , device = 'cpu'):
+def fineTune(model, train_loader, val_loader, num_epochs=20, theta = 0.4 , name='new_model.pth' , save_freq = 2, metric = 'ssim' , device = 'cpu'):
     model.train()
     optimizer = optim.Adam(filter(lambda p: p.requires_grad, model.parameters()), lr=1e-4)
     scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
@@ -608,6 +627,10 @@ def fineTune(model, train_loader, val_loader, num_epochs=20 , name='new_model.pt
     patience=3,
     min_lr=1e-7
 )
+    
+    
+    use_amp = device.type == "mps"
+    amp_dtype = torch.float16
 
     x_sample, y_sample = next(iter(train_loader))
     print(f"x range: [{x_sample.min():.3f}, {x_sample.max():.3f}]")
@@ -619,6 +642,9 @@ def fineTune(model, train_loader, val_loader, num_epochs=20 , name='new_model.pt
     psnr_scores = []
     psnr_scores_train = []
     epochs10 =[]
+    dists_scores = []
+    dists_scores_train = []
+    ssim_scores = []
 
 
             
@@ -631,43 +657,61 @@ def fineTune(model, train_loader, val_loader, num_epochs=20 , name='new_model.pt
         
         for batch_idx, (x, y) in enumerate(train_loader):
             x, y = x.to(device), y.to(device)
-            pred = model(x)
             optimizer.zero_grad()
-            loss = calc_loss(pred, y, metric ,theta=0.4)
+            if use_amp:
+                with torch.autocast(device_type="mps", dtype=amp_dtype):
+                    pred = model(x)
+                    pred = pred.clamp(0, 1)
+                    
+                    
+            else:
+                pred = model(x)
+                pred = pred.clamp(0, 1)
+            loss = calc_loss(pred.float(), y.float(), metric ,theta)
             loss.backward()
+            dists_t = dists_loss(pred, y)
             optimizer.step()
             total_loss += loss.item()
             train_losses.append(loss.item())
             
             if (batch_idx + 1) % 10 == 0:
                 psnr10 = psnr_metric(pred , y).item()
-                print(f"  Batch {batch_idx + 1}/{len(train_loader)} | Loss: {loss.item():.8f} \n PSNR: {psnr10}")
+                print(f"  Batch {batch_idx + 1}/{len(train_loader)} | Loss: {loss.item():.8f} \n PSNR: {psnr10} | DISTS: {dists_t}")
                 psnr_scores_train.append(psnr10)
+                dists_scores_train.append(dists_t)
         
         epoch_time = time.time() - epoch_start
         print(f"Epoch {epoch+1}/{num_epochs} | Loss: {total_loss/len(train_loader):.8f} | Time: {epoch_time:.4f}s")
         torch.save(model.state_dict(), name)
 
         model.eval()
-        with torch.no_grad():
+        with torch.inference_mode():
             psnr_score = 0.0
             psnr_sum = 0.0
             val_loss_sum = 0.0
-            ssim_score_val = 0.0
-            dists_score_val = 0.0
+            ssim_score_val= 0.0
+            ssim_score_10 = 0.0
+            dists_score_val, dists_score_10 = 0.0
             psnr_metric.reset()
             for batch_idx, (x,y) in enumerate(val_loader):
                 x,y = x.to(device) , y.to(device)
-                pred = model(x)
-                val_loss = calc_loss(pred, y, metric ,theta = 0.4 )
+                with torch.autocast(device_type="mps", dtype=torch.float16):
+                    pred = model(x)
+                pred = pred.clamp(0,1)
+                val_loss = calc_loss(pred, y, metric ,theta )
                 ssim_val, psnr_val, dists_val = all_losses(pred, y)
                 val_losses.append(val_loss.item())
                 psnr_score = psnr_metric(pred, y).item()
                 psnr_sum += psnr_score
                 psnr_scores.append(psnr_score) 
+                dists_scores.append(dists_val)
+                ssim_scores.append(ssim_val)
                 val_loss_sum += val_loss.item()
                 ssim_score_val += ssim_val
                 dists_score_val += dists_val
+                dists_score_10 += dists_val
+                ssim_score_10 += ssim_val
+
         
                 
                 
@@ -675,12 +719,14 @@ def fineTune(model, train_loader, val_loader, num_epochs=20 , name='new_model.pt
                 if (batch_idx + 1) % 10 == 0:
                     epochs10.append(epoch+1)
                     print(f"Batch: {batch_idx+1}/{len(val_loader)} | Val Loss: {val_loss.item():.8f}")
-                    print(f" DISTS: {dists_score_val/len(val_loader):.4f} | SSIM: {ssim_score_val/len(val_loader)}")
+                    print(f" DISTS: {dists_score_10/10:.4f} | SSIM: {ssim_score_val/10:.4f}")
+                    ssim_score_10 = 0
+                    dists_score_10 = 0
             
 
             scheduler.step(val_loss_sum/len(val_loader))
             current_lr = optimizer.param_groups[0]["lr"]
-            print(f"Avg Val loss: {val_loss_sum/len(val_loader):.8f} \n Avg PSNR Score: {psnr_sum/len(val_loader):.8f} \n lr: {current_lr}")
+            print(f"Avg Val loss: {val_loss_sum/len(val_loader):.8f} \n Avg PSNR Score: {psnr_sum/len(val_loader):.8f} \n lr: {current_lr} \n Avg DISTS Score: {dists_score_val/len(val_loader):.8f} \n Avg SSIM Score: {ssim_score_val/len(val_loader):.8f}")
 
         epochs_plotted.append(epoch+1)    
 
@@ -701,7 +747,6 @@ def fineTune(model, train_loader, val_loader, num_epochs=20 , name='new_model.pt
 
     plt.plot(epochs_plotted, train_losses, label="Train Loss", color="blue" , linestyle = "--" , linewidth = 2 )
     plt.plot(epochs_plotted, val_losses, label="Val Loss", color="red", linewidth = 2)
-
     plt.xlabel("Epoch")
     plt.ylabel("Loss")
     plt.legend()
@@ -712,6 +757,14 @@ def fineTune(model, train_loader, val_loader, num_epochs=20 , name='new_model.pt
     plt.plot(epochs10, psnr_scores_train, label = "PSNR Training" , color = "orange" , linestyle = '--' , linewidth = 2 )
     plt.xlabel("Epoch")
     plt.ylabel("PSNR (dB)") 
+    plt.legend()
+    plt.grid(True)
+    plt.show()
+
+    plt.plot(epochs_plotted, dists_scores, label="DISTS VAL", color="blue" , linestyle = "--" , linewidth = 2 )
+    plt.plot(epochs_plotted, ssim_scores, label="SSIM VAL", color="red", linewidth = 2)
+    plt.xlabel("Epoch")
+    plt.ylabel("Scores")
     plt.legend()
     plt.grid(True)
     plt.show()
@@ -743,14 +796,17 @@ def test_func(model, ip_img, transform, device='cpu'):
     psnr_metric = PeakSignalNoiseRatio(data_range=1.0).to(device)
 
     start = time.time()
-    with torch.no_grad():
-        pred = model(x_noised)
+    with torch.inference_mode():
+        with torch.autocast(device_type="mps", dtype=torch.float16):
+            pred = model(x_noised)
+        pred = pred.clamp(0,1)
+        loss = calc_loss(pred.tofloat(), y_batch.tofloat(), theta=0.4)
         pred_cpu = pred.cpu()
 
-        loss = calc_loss(pred, y_batch, theta=0.4)
         ssim_score = ssim(pred, y_batch, data_range=1.0, size_average=True).item()
         psnr_score = psnr_metric(pred, y_batch).item()
         ssim_val, psnr_val, dists_val = all_losses(pred, y_batch)
+
 
     print(f"Loss: {loss.item():.8f} | SSIM: {ssim_score:.4f}")
     print(f"PSNR: {psnr_score:.4f} dB")
@@ -813,8 +869,9 @@ def test_func_batches(model, test_loader, device='cpu', transform = None):
             # if y.shape[1] == 3:
             #     y = y[:, :1, :, :]
 
-
-            pred = model(x).to(device)
+            with torch.autocast('mps' , dtype = torch.float16):
+                pred = model(x).to(device)
+                test_loss = calc_loss(pred, y, theta=0.4)
             # pred = to_1ch(pred).to(device)
 
             # if pred.dim() == 4 and pred.shape[1] == 3:
@@ -822,7 +879,7 @@ def test_func_batches(model, test_loader, device='cpu', transform = None):
 
             pred = pred.clamp(0.0, 1.0)
 
-            test_loss = calc_loss(pred, y, theta=0.4)
+            
             ssim_val, psnr_val, dists_val = all_losses(pred, y)
             ssim_b, psnr_b, dists_b = all_losses(pred, y)
             
