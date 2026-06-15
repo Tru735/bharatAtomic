@@ -1,10 +1,9 @@
-numpy
-pandas
-matplotlib
 torch
 torchvision
-scikit-image
-opencv-python
-tqdm
-time
+numpy
+matplotlib
+Pillow
 tifffile
+albumentations
+pytorch-msssim
+torchmetrics

@@ -2,7 +2,6 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import torch.optim as optim
-from models.rdunet import RDUNet 
 import pickle as pkl
 import numpy as np
 import matplotlib.pyplot as plt
@@ -72,10 +71,10 @@ class AttentionGate(nn.Module):
             nn.Conv2d(s_channels, inter_channels, kernel_size=1),
             nn.BatchNorm2d(inter_channels)
         )
-        self.upgrade = nn.Sequential(
-            nn.Conv2d(inter_channels, inter_channels, kernel_size = 3),
-            nn.GroupNorm(inter_channels)
-        )
+        # self.upgrade = nn.Sequential(
+        #     nn.Conv2d(inter_channels, inter_channels, kernel_size = 3, padding = 1),
+        #     nn.GroupNorm(num_groups = 8 , num_channels = inter_channels)
+        # )
         self.psi = nn.Sequential(
             nn.Conv2d(inter_channels, 1, kernel_size=1),
             nn.Sigmoid()
@@ -85,8 +84,8 @@ class AttentionGate(nn.Module):
         g1 = self.Wg(g)       # Decoder features
         s1 = self.Ws(s)       # Skip connection features
         out = F.relu(g1 + s1) # Merge signals
-        upg = self.upgrade(out)
-        upg = F.relu(upg) 
+        # out = self.upgrade(out)
+        upg = F.relu(out) 
         psi = self.psi(upg)   # Attention map (0 to 1)
         return s * psi        # Filtered skip
     
