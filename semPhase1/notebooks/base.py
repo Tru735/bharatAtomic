@@ -12,7 +12,7 @@ fine tune function
 import torch
 import torch.nn as nn
 import torch.optim as optim
-from models.rdunet import RDUNet 
+# from models.rdunet import RDUNet 
 import pickle as pkl
 import numpy as np
 import matplotlib.pyplot as plt
@@ -26,9 +26,9 @@ from torch.utils.data import Dataset, DataLoader, random_split
 import os
 from pytorch_msssim import ssim
 from torchmetrics.image import PeakSignalNoiseRatio
-from NAFNet_arch import NAFNet, NAFBlock, NAFNetLocal, SimpleGate
-from local_arch import AvgPool2d , Local_Base
-import arch_util
+from semPhase1.notebooks.training_notebooks.nafnet_imports.NAFNet_arch import NAFNet, NAFBlock, NAFNetLocal, SimpleGate
+from semPhase1.notebooks.training_notebooks.nafnet_imports.local_arch import AvgPool2d , Local_Base
+import semPhase1.notebooks.training_notebooks.nafnet_imports.arch_util as arch_util
 from pathlib import Path
 from DISTS_pytorch import DISTS
 from torchmetrics.functional.image.dists import deep_image_structure_and_texture_similarity as dists_fn
@@ -489,9 +489,253 @@ class NoiseImage:
             "y": img,
             "noise_added": applied,
         }
+    
+    def mid_augment_sem(self, img, seed=None):
+        rng = np.random.default_rng(seed)
+        out = img.copy()
 
-    def augment(self, img, seed=None):
-        return self.augment_sem(img, seed=seed)
+        applied = {
+            "poisson_gaussian": False,
+            "scanline": False,
+            "line_shift": False,
+            "drift_distortion": False,
+            "charging_artifact": False,
+            "detector_streaks": False,
+        }
+
+        ## POISSON NOISE
+        if rng.random() < 0.85:
+            poisson_scale = rng.uniform(16.0, 96.0)
+            gauss_var = rng.uniform(0.008, 0.035)
+            out = self.add_mixed_poisson_gaussian_noise(
+                out,
+                poisson_scale=poisson_scale,
+                gauss_var=gauss_var,
+                seed=int(rng.integers(0, 1_000_000))
+            )
+            applied["poisson_gaussian"] = {
+                "fired": True,
+                "poisson_scale": float(poisson_scale),
+                "gauss_var": float(gauss_var),
+            }
+
+        ## SCANLINE NOISE
+        if rng.random() < 0.60:
+            line_var = rng.uniform(0.02, 0.07)
+            out = self.add_scanline_noise(
+                out,
+                line_var=line_var,
+                seed=int(rng.integers(0, 1_000_000))
+            )
+            applied["scanline"] = {
+                "fired": True,
+                "line_var": float(line_var),
+            }
+
+        ## LINE SHIFT NOISE
+        if rng.random() < 0.40:
+            max_shift = int(rng.uniform(5, 30))
+            shift_prob = rng.uniform(0.10, 0.40)
+            out = self.add_line_shift_artifact(
+                out,
+                max_shift=max_shift,
+                shift_prob=shift_prob,
+                seed=int(rng.integers(0, 1_000_000))
+            )
+            applied["line_shift"] = {
+                "fired": True,
+                "max_shift": max_shift,
+                "shift_prob": float(shift_prob),
+            }
+
+        ## DRIFT NOISE
+        if rng.random() < 0.48:
+            max_drift = rng.uniform(10.0, 50.0)
+            out = self.add_drift_distortion(
+                out,
+                max_drift=max_drift,
+                seed=int(rng.integers(0, 1_000_000))
+            )
+            applied["drift_distortion"] = {
+                "fired": True,
+                "max_drift": float(max_drift),
+            }
+
+        ## CHARGING NOISE
+        if rng.random() < 0.38:
+            strength = rng.uniform(0.30, 0.65)
+            vertical = rng.random() < 0.5
+            out = self.add_charging_artifact(
+                out,
+                strength=strength,
+                vertical=vertical,
+                seed=int(rng.integers(0, 1_000_000))
+            )
+            applied["charging_artifact"] = {
+                "fired": True,
+                "strength": float(strength),
+                "vertical": bool(vertical),
+            }
+
+        ## DETECTOR STREAK
+        if rng.random() < 0.20:
+            amount = rng.uniform(0.003, 0.015)
+            out = self.add_detector_streak_pixels(
+                out,
+                amount=amount,
+                seed=int(rng.integers(0, 1_000_000))
+            )
+            applied["detector_streaks"] = {
+                "fired": True,
+                "amount": float(amount),
+            }
+
+        return {
+            "x": out,
+            "y": img,
+            "noise_added": applied,
+        }
+
+    def uf_augment_sem(self, img, seed=None):
+        rng = np.random.default_rng(seed)
+        out = img.copy()
+
+        applied = {
+            "poisson_gaussian": False,
+            "scanline": False,
+            "line_shift": False,
+            "drift_distortion": False,
+            "charging_artifact": False,
+            "detector_streaks": False,
+        }
+
+## POISSON NOISE
+        if rng.random() < 0.85:
+            poisson_scale = rng.uniform(2.0, 64.0)
+            gauss_var = rng.uniform(0.02, 0.08)
+            out = self.add_mixed_poisson_gaussian_noise(
+                out,
+                poisson_scale=poisson_scale,
+                gauss_var=gauss_var,
+                seed=int(rng.integers(0, 1_000_000))
+            )
+            applied["poisson_gaussian"] = {
+                "fired": True,
+                "poisson_scale": float(poisson_scale),
+                "gauss_var": float(gauss_var),
+            }
+
+## SCANLINE NOISE
+        if rng.random() < 0.65:
+            line_var = rng.uniform(0.05, 0.20)
+            out = self.add_scanline_noise(
+                out,
+                line_var=line_var,
+                seed=int(rng.integers(0, 1_000_000))
+            )
+            applied["scanline"] = {
+                "fired": True,
+                "line_var": float(line_var),
+            }
+
+## LINE SHIFT NOISE
+        if rng.random() < 0.45:
+            if rng.random() > 0.38:
+                max_shift = 80
+            else:
+                max_shift = int(rng.uniform(10, 50))
+            shift_prob = rng.uniform(0.3, 0.80)
+            out = self.add_line_shift_artifact(
+                out,
+                max_shift=max_shift,
+                shift_prob=shift_prob,
+                seed=int(rng.integers(0, 1_000_000))
+            )
+            applied["line_shift"] = {
+                "fired": True,
+                "max_shift": max_shift,
+                "shift_prob": float(shift_prob),
+            }
+
+## DRIFT NOISE
+        if rng.random() < 0.55:
+            max_drift = rng.uniform(20.0, 150.0)
+            out = self.add_drift_distortion(
+                out,
+                max_drift=max_drift,
+                seed=int(rng.integers(0, 1_000_000))
+            )
+            applied["drift_distortion"] = {
+                "fired": True,
+                "max_drift": float(max_drift),
+            }
+
+## CHARGING NOISE
+        if rng.random() < 0.45:
+            strength = rng.uniform(0.5, 1.0)
+            vertical = rng.random() < 0.5
+            out = self.add_charging_artifact(
+                out,
+                strength=strength,
+                vertical=vertical,
+                seed=int(rng.integers(0, 1_000_000))
+            )
+            applied["charging_artifact"] = {
+                "fired": True,
+                "strength": float(strength),
+                "vertical": bool(vertical),
+            }
+## DETECTOR STREAK
+        if rng.random() < 0.20:
+            amount = rng.uniform(0.01, 0.05)
+            out = self.add_detector_streak_pixels(
+                out,
+                amount=amount,
+                seed=int(rng.integers(0, 1_000_000))
+            )
+            applied["detector_streaks"] = {
+                "fired": True,
+                "amount": float(amount),
+            }
+
+        return {
+            "x": out,
+            "y": img,
+            "noise_added": applied,
+        }
+    
+    def build_augmentation_split(self, dataset, seed=42):
+        n = len(dataset)
+        rng = np.random.default_rng(seed)
+        perm = rng.permutation(n)
+
+        cut1 = int(n * 0.40)
+        cut2 = int(n * 0.70)  # 0.40 + 0.30
+
+        normal_idx = perm[:cut1]
+        mid_idx    = perm[cut1:cut2]
+        uf_idx     = perm[cut2:]
+
+        assignment = {}
+        for i in normal_idx:
+            assignment[int(i)] = "normal"
+        for i in mid_idx:
+            assignment[int(i)] = "mid"
+        for i in uf_idx:
+            assignment[int(i)] = "uf"
+
+        return assignment
+    
+
+    def augment_3way_sem(self, img, idx, assignment, seed=None):
+        mode = assignment[idx]
+        if mode == "normal":
+            return self.new_augment_sem(img, seed=seed)
+        elif mode == "mid":
+            return self.mid_augment_sem(img, seed=seed)
+        else:
+            return self.uf_augment_sem(img, seed=seed)
+
 
 
 def augment(noisy_images, repeats=5):
@@ -580,7 +824,7 @@ class CustomData(Dataset):
 
         # Then: create noisy input from the augmented target
         if self.noise_obj is not None:
-            out = self.noise_obj.new_augment_sem(y_img.copy())
+            out = self.noise_obj.augment_3way_sem(y_img.copy())
         else:
             x_img = y_img.copy()
 
@@ -646,7 +890,7 @@ def fineTune(model, train_loader, val_loader, num_epochs=20, theta = 0.4 , name=
     x_sample, y_sample = next(iter(train_loader))
     print(f"x range: [{x_sample.min():.3f}, {x_sample.max():.3f}]")
     print(f"y range: [{y_sample.min():.3f}, {y_sample.max():.3f}]")
-    channels = x_sample[1]
+    channels = int(x_sample.shape[1])
     # Expected: x range: [-1.0, 1.0], y range: [-1.0, 1.0]
     train_losses, val_losses, epochs_plotted, epochs10 = [], [], [], []
     psnr_scores, psnr_scores_train = [], []
@@ -694,6 +938,7 @@ def fineTune(model, train_loader, val_loader, num_epochs=20, theta = 0.4 , name=
 
     ## EVALUATION
         model.eval()
+        channels = int(x_sample.shape[1])
         with torch.no_grad():
             psnr_sum = val_loss_sum = ssim_score_val = dists_score_val = 0.0
             ssim_score_10 = dists_score_10 = 0.0
@@ -734,7 +979,7 @@ def fineTune(model, train_loader, val_loader, num_epochs=20, theta = 0.4 , name=
                 if (batch_idx + 1) % 10 == 0:
                     epochs10.append(epoch+1)
                     print(f"Batch: {batch_idx+1}/{len(val_loader)} | Val Loss: {val_loss.item():.8f}")
-                    print(f" DISTS: {dists_score_10/10:.4f} | SSIM: {ssim_score_val/10:.4f}")
+                    print(f" DISTS: {dists_score_10/10:.4f} | SSIM: {ssim_score_10/10:.4f}")
                     ssim_score_10 = 0
                     dists_score_10 = 0
             
@@ -790,7 +1035,7 @@ def fineTune(model, train_loader, val_loader, num_epochs=20, theta = 0.4 , name=
 
 
 
-def test_func(model, ip_img, transform, channels=3, device='cpu'):
+def test_func(model, ip_img, transform, augmentation = 1,  channels=3, device='cpu'):
     """
     channels=3 : model expects RGB input  (e.g. AttentionUNet, NAFNet trained on RGB)
     channels=1 : model expects grayscale  (e.g. RDUNet trained on single-channel SEM)
@@ -818,7 +1063,12 @@ def test_func(model, ip_img, transform, channels=3, device='cpu'):
         img_resized = img_array
  
     noise_obj = NoiseImage()
-    out = noise_obj.new_augment_sem(img_resized)              # handles 2D and 3D
+    if augmentation == 1:
+        out = noise_obj.new_augment_sem(img_resized) 
+    elif augmentation == 2:
+        out = noise_obj.mid_augment_sem(img_resized)
+    elif augmentation ==3:
+        out = noise_obj.uf_augment_sem(img_resized)             # handles 2D and 3D
  
     x_np = out["x"].astype(np.float32) / 255.0               # noisy
     y_np = out["y"].astype(np.float32) / 255.0               # clean

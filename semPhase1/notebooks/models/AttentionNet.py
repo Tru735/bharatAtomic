@@ -15,9 +15,9 @@ from torch.utils.data import Dataset, DataLoader, random_split
 import os
 from pytorch_msssim import ssim
 from torchmetrics.image import PeakSignalNoiseRatio
-from NAFNet_arch import NAFNet, NAFBlock, NAFNetLocal, SimpleGate
-from local_arch import AvgPool2d , Local_Base
-import arch_util
+from semPhase1.notebooks.training_notebooks.nafnet_imports.NAFNet_arch import NAFNet, NAFBlock, NAFNetLocal, SimpleGate
+from semPhase1.notebooks.training_notebooks.nafnet_imports.local_arch import AvgPool2d , Local_Base
+import semPhase1.notebooks.training_notebooks.nafnet_imports.arch_util as arch_util
 from pathlib import Path
 
 
