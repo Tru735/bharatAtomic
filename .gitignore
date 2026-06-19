@@ -62,6 +62,7 @@ semPhase1/model_weights/
 semPhase1/notebooks/images/
 semPhase1/notebooks/pix2pix/
 semPhase1/pix2pix/
+semPhase2/PerovSegNet-Dataset
 
 # External repositories
 semPhase1/NAFNet_github_megvii/
@@ -71,3 +72,8 @@ semPhase1/RDUNet_github_gurrola/
 .claude/
 CLAUDE.md
 get-pip.py
+
+## ======================================
+## ScratchPads, Notepads, Roughwork    ||
+## ======================================
+semPhase2/notes.md

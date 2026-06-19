@@ -10,3 +10,6 @@
 [submodule "semPhase1/pix2pix"]
 	path = semPhase1/pix2pix
 	url = https://github.com/junyanz/pytorch-CycleGAN-and-pix2pix
+[submodule "semPhase2/PerovSegNet-Dataset"]
+	path = semPhase2/PerovSegNet-Dataset
+	url = https://github.com/GodLinW/PerovSegNet-Dataset

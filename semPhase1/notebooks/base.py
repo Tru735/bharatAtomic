@@ -128,7 +128,7 @@ def transform_1(size):
             additional_targets={"output": "image"})
 
 
-def calc_loss(pred, target,metric = 'ssim', theta=0.2):
+def calc_loss(pred, target, metric = 'ssim', alpha = 0.4, theta=0.3):
     if metric == 'ssim':
         ssim_val = ssim(pred, target, data_range=1.0, size_average=True)
         ssim_fn = (1.00-ssim_val)
@@ -138,6 +138,11 @@ def calc_loss(pred, target,metric = 'ssim', theta=0.2):
         # Use the raw score directly as the loss; do NOT subtract from 1.
         dists_loss = D(pred.float(), target.float(), require_grad=True, batch_average=True)
         return ((1 - theta) * l1(pred, target)) + (theta * dists_loss)
+    elif metric == 'lsd':
+        ssim_loss = ssim(pred, target, data_range = 1.0, size_average=True)
+        ssim_fn = (1.00 - ssim_loss)
+        dists_loss = D(pred.float(), target.float(),  require_grad= True, batch_average = True)
+        return((alpha*l1(pred, target)) + (alpha*ssim_fn) + (theta*dists_loss))
 
         
 
@@ -892,19 +897,43 @@ def load_data(train_dataset, test_dataset, batch_size, val_ratio=0.2):
 # test_dataset = CustomData(noisy_testing_dataset, transform=test_transform_naf, repeats=1, training=False)
 # train_loader, val_loader, test_loader = load_data(train_dataset, test_dataset, batch_size=4)
 
+import copy
+class EarlyStopping:
+    def __init__(self, patience = 5, delta = 0.001):
+        self.patience = patience
+        self.delta = delta
+        self.counter = 0
+        self.best_loss = float('inf')
+        self.early_stop = False
+        self.best_model_state = None
+
+    def __call__(self, val_loss, model):
+        # Check if the validation loss improved significantly
+        if val_loss < (self.best_loss - self.min_delta):
+            self.best_loss = val_loss
+            # Save a deep copy of the best model weights
+            self.best_model_state = copy.deepcopy(model.state_dict())
+            self.counter = 0
+        else:
+            self.counter += 1
+            if self.counter >= self.patience:
+                self.early_stop = True
+        
 
 import time
 
 def fineTune(model, train_loader, val_loader, num_epochs=20, theta = 0.4 , name='new_model.pth' , save_freq = 2, metric = 'ssim' , device = 'cpu'):
     model.train()
-    optimizer = optim.Adam(filter(lambda p: p.requires_grad, model.parameters()), lr=1e-4)
+    optimizer = optim.Adam(filter(lambda p: p.requires_grad, model.parameters()), lr=1e-3)
     scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
     optimizer,
     mode='min',
     factor=0.5,
-    patience=5,
+    patience=3,
     min_lr=1e-8
 )
+    
+    early_stop = EarlyStopping(patience=5, delta=0.001)
     
     
     use_amp = (device.type == "mps")
@@ -1058,6 +1087,13 @@ def fineTune(model, train_loader, val_loader, num_epochs=20, theta = 0.4 , name=
         if ((epoch+1) % save_freq) == 0:
             torch.save({'epoch' : epoch+1 , 'model_state_dict': model.state_dict(), 'optimizer_state_dict' : optimizer.state_dict()}, name)
             
+        early_stop(avg_val_loss, model)
+        if early_stop.early_stop:
+            print("Early stopping triggered. Halting training.")
+            break
+
+    if early_stop.best_model_state is not None:
+        model.load_state_dict(early_stop.best_model_state)
 
     
     # fineTune(rdunet_model, train_loader, val_loader, num_epochs=1
