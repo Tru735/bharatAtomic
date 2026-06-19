@@ -128,7 +128,7 @@ def transform_1(size):
             additional_targets={"output": "image"})
 
 
-def calc_loss(pred, target, metric = 'ssim', alpha = 0.4, theta=0.3):
+def calc_loss(pred, target, metric = 'ssim', alpha = 0.4,beta=0.3,  theta=0.3):
     if metric == 'ssim':
         ssim_val = ssim(pred, target, data_range=1.0, size_average=True)
         ssim_fn = (1.00-ssim_val)
@@ -142,7 +142,7 @@ def calc_loss(pred, target, metric = 'ssim', alpha = 0.4, theta=0.3):
         ssim_loss = ssim(pred, target, data_range = 1.0, size_average=True)
         ssim_fn = (1.00 - ssim_loss)
         dists_loss = D(pred.float(), target.float(),  require_grad= True, batch_average = True)
-        return((alpha*l1(pred, target)) + (alpha*ssim_fn) + (theta*dists_loss))
+        return((alpha*l1(pred, target)) + (beta*ssim_fn) + (theta*dists_loss))
 
         
 
@@ -909,7 +909,7 @@ class EarlyStopping:
 
     def __call__(self, val_loss, model):
         # Check if the validation loss improved significantly
-        if val_loss < (self.best_loss - self.min_delta):
+        if val_loss < (self.best_loss - self.delta):
             self.best_loss = val_loss
             # Save a deep copy of the best model weights
             self.best_model_state = copy.deepcopy(model.state_dict())
