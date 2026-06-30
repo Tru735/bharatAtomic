@@ -150,14 +150,16 @@ def calc_loss(pred, target, metric = 'ssim', alpha = 0.4,beta=0.3,  theta=0.3):
 def all_losses(pred, target, train = True, c=1):
     # rmse_val = mse_fn(pred,target)
     if c == 1:
-        pred_rgb = pred.repeat(1,3,1,1)
-        target_rgb = target.repeat(1,3,1,1)
+        pred_rgb = pred.repeat(1, 3, 1, 1)
+        target_rgb = target.repeat(1, 3, 1, 1)
         ssim_val = ssim(pred_rgb, target_rgb, data_range=1.0, size_average=True).item()
+        dists_val = D(pred_rgb.float(), target_rgb.float(), require_grad=train, batch_average=True).item()  # <-- add this
     else:
         ssim_val = ssim(pred, target, data_range=1.0, size_average=True).item()
+        dists_val = D(pred.float(), target.float(), require_grad=train, batch_average=True).item()
     psnr_val = psnr_metric(pred, target).item()
-    dists_val = D(pred.float(), target.float(), require_grad=train, batch_average=True).item()
     return ssim_val, psnr_val, dists_val
+
 
 
 def dists_loss(pred, target):
@@ -922,9 +924,9 @@ class EarlyStopping:
 
 import time
 
-def fineTune(model, train_loader, val_loader, num_epochs=20, theta = 0.4 , name='new_model.pth' , save_freq = 2, metric = 'ssim' , device = 'cpu'):
+def fineTune(model, train_loader, val_loader, num_epochs=20, theta = 0.3 , name='new_model.pth' , save_freq = 2, metric = 'ssim' , device = 'cpu'):
     model.train()
-    optimizer = optim.Adam(filter(lambda p: p.requires_grad, model.parameters()), lr=1e-3)
+    optimizer = optim.Adam(filter(lambda p: p.requires_grad, model.parameters()), lr=1e-4)
     scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
     optimizer,
     mode='min',
@@ -974,10 +976,10 @@ def fineTune(model, train_loader, val_loader, num_epochs=20, theta = 0.4 , name=
             if use_amp:
                 with torch.amp.autocast(device_type="mps", dtype=amp_dtype):
                     pred = model(x).clamp(0,1)
-                    loss = calc_loss(pred.float(), y.float(), metric ,theta)
+                    loss = calc_loss(pred.float(), y.float(), metric ,)
             else:
                 pred = model(x).clamp(0,1)
-                loss = calc_loss(pred.float(), y.float(), metric ,theta)
+                loss = calc_loss(pred.float(), y.float(), metric ,)
 
             loss.backward()
             optimizer.step()
@@ -987,7 +989,7 @@ def fineTune(model, train_loader, val_loader, num_epochs=20, theta = 0.4 , name=
             
             if (batch_idx + 1) % 10 == 0:
                 with torch.no_grad():
-                    dists_t = (loss - ((1-theta)*l1(pred, y)))/theta
+                    dists_t = D(pred.float(), y.float(), require_grad=True, batch_average=True)
                     psnr10 = psnr_metric(pred , y).item()
 
                 print(f"  Batch {batch_idx + 1}/{len(train_loader)} | Loss: {loss.item():.8f} \n PSNR: {psnr10} | DISTS: {dists_t}")
@@ -1025,14 +1027,14 @@ def fineTune(model, train_loader, val_loader, num_epochs=20, theta = 0.4 , name=
                 x,y = x.to(device) , y.to(device)
 
                 if use_amp:
-                    with torch.autocast(device_type="mps", dtype=torch.float16):
+                    with torch.autocast(device_type="mps", dtype=torch.bfloat16):
                         pred = model(x).clamp(0,1)
                 else:
                     pred = model(x).clamp(0, 1)
 
 
                 pred_f, y_f = pred.float(), y.float()
-                val_loss = calc_loss(pred_f, y_f, metric, theta)
+                val_loss = calc_loss(pred_f, y_f, metric)
                 ssim_val, psnr_val, dists_val = all_losses(pred_f, y_f ,train = False ,c = channels)
                 val_losses.append(val_loss.item())
                 psnr_score = psnr_val
@@ -1120,7 +1122,10 @@ def fineTune(model, train_loader, val_loader, num_epochs=20, theta = 0.4 , name=
     plt.grid(True)
     plt.show()
 
-    plt.plot(epochs_plotted, psnr_train_epochs, label="PSNR - Training", color="green", linewidth=2)
+    n = len(epochs_plotted)
+    psnr_to_plot = psnr_train_epochs[-n:] if len(psnr_train_epochs) >= n else psnr_train_epochs
+    plt.plot(range(len(psnr_to_plot)), psnr_to_plot, label="PSNR - Training", color="green", linewidth=2)
+    # plt.plot(epochs_plotted, psnr_train_epochs, label="PSNR - Training", color="green", linewidth=2)
     plt.xlabel("Epoch")
     plt.ylabel("PSNR (dB)") 
     plt.legend()
@@ -1197,7 +1202,7 @@ def test_func(model, ip_img, transform, augmentation = 1,  channels=3, device='c
  
     with torch.inference_mode():
         start = time.time()
-        with torch.autocast(device_type=device_str, dtype=torch.float16):
+        with torch.autocast(device_type=device_str, dtype=torch.bfloat16):
             pred = model(x)
         pred_time = time.time() - start                       # pure model latency
  
@@ -1210,7 +1215,8 @@ def test_func(model, ip_img, transform, augmentation = 1,  channels=3, device='c
         psnr_score = psnr_metric(pred, y_f).item()
         _, _, dists_val = all_losses(pred, y_f, train=False, c=channels)
         _,_,dists_init = all_losses(x_f, y_f, train=False, c= channels)
-        loss = calc_loss(pred, y_f, theta=0.4)
+        loss = calc_loss(pred, y_f, metric = 'lsd'
+)
         pred_cpu = pred.cpu()
  
     total_time = time.time() - start
@@ -1268,6 +1274,8 @@ def test_func_batches(model, test_loader, device='cpu', transform = None):
         test_loss_sum = 0.0
         psnr_score = 0.0
         ssim_val, dists_val = 0.0,0.0
+        psnr_val = 0.0
+    
 
         for batch_id, (x, y) in enumerate(test_loader):        
 
@@ -1277,7 +1285,7 @@ def test_func_batches(model, test_loader, device='cpu', transform = None):
 
             with torch.autocast('mps' , dtype = torch.float16):
                 pred = model(x).to(device)
-                test_loss = calc_loss(pred, y, theta=0.4)
+                test_loss = calc_loss(pred, y,)
             # pred = to_1ch(pred).to(device)
 
             # if pred.dim() == 4 and pred.shape[1] == 3:
@@ -1286,8 +1294,7 @@ def test_func_batches(model, test_loader, device='cpu', transform = None):
             pred = pred.clamp(0.0, 1.0).float()
 
             
-            ssim_val, psnr_val, dists_val = all_losses(pred, y)
-            ssim_b, psnr_b, dists_b = all_losses(pred, y)
+            ssim_b, psnr_b, dists_b = all_losses(pred, y, train=False)
             
             ssim_val += ssim_b
             psnr_val += psnr_b
